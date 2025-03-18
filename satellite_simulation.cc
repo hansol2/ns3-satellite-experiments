@@ -1,10 +1,10 @@
+
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/csma-module.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/applications-module.h"
-#include "ns3/satellite-module.h"
 
 using namespace ns3;
 
@@ -16,7 +16,7 @@ int main(int argc, char *argv[]) {
 
     NS_LOG_INFO("Starting Satellite Network Simulation...");
 
-    // 1️⃣ 노드 생성 (EndUser1 - UT - Satellite - GW - EndUser2)
+    // 노드 생성
     NodeContainer endUser1, ut, satellite, gw, endUser2;
     endUser1.Create(1);
     ut.Create(1);
@@ -24,7 +24,7 @@ int main(int argc, char *argv[]) {
     gw.Create(1);
     endUser2.Create(1);
 
-    // 2️⃣ CSMA 채널 설정 (EndUser ↔ UT, GW ↔ EndUser)
+    // CSMA 채널 설정 (EndUser1 <-> UT, GW <-> EndUser2)
     CsmaHelper csma;
     csma.SetChannelAttribute("DataRate", StringValue("100Mbps"));
     csma.SetChannelAttribute("Delay", StringValue("1ms"));
@@ -32,24 +32,22 @@ int main(int argc, char *argv[]) {
     NetDeviceContainer devUserUt = csma.Install(NodeContainer(endUser1.Get(0), ut.Get(0)));
     NetDeviceContainer devGwUser = csma.Install(NodeContainer(gw.Get(0), endUser2.Get(0)));
 
-    // 3️⃣ SAT 채널 설정 (UT ↔ Satellite, Satellite ↔ GW) ✅ SetAttribute() 사용
-    Ptr<SatChannel> satChannel = CreateObject<SatChannel>(); // ✅ 위성 채널 객체 직접 생성
+    // 위성 링크 (PointToPointHelper로 대체)
+    PointToPointHelper satelliteLink;
+    satelliteLink.SetDeviceAttribute("DataRate", StringValue("10Mbps"));
+    satelliteLink.SetChannelAttribute("Delay", StringValue("250ms"));
 
-    SatNetDeviceHelper satNetDeviceHelper;
-    satNetDeviceHelper.SetAttribute("Delay", TimeValue(MilliSeconds(250)));  // ✅ 위성 전송 지연 설정
-    satNetDeviceHelper.SetAttribute("DataRate", DataRateValue(DataRate("10Mbps")));  // ✅ 위성 링크 속도 설정
+    NetDeviceContainer devUtSat = satelliteLink.Install(NodeContainer(ut.Get(0), satellite.Get(0)));
+    NetDeviceContainer devSatGw = satelliteLink.Install(NodeContainer(satellite.Get(0), gw.Get(0)));
 
-    NetDeviceContainer devUtSat = satNetDeviceHelper.Install(ut.Get(0), satellite.Get(0), satChannel);
-    NetDeviceContainer devSatGw = satNetDeviceHelper.Install(satellite.Get(0), gw.Get(0), satChannel);
-
-    // 4️⃣ Ideal 채널 설정 (GW ↔ EndUser2)
+    // GW <-> EndUser2 연결 (P2P 고속 링크)
     PointToPointHelper idealLink;
     idealLink.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
     idealLink.SetChannelAttribute("Delay", StringValue("0.1ms"));
 
     NetDeviceContainer devIdeal = idealLink.Install(NodeContainer(gw.Get(0), endUser2.Get(0)));
 
-    // 5️⃣ 인터넷 스택 설치
+    // 인터넷 스택 설치
     InternetStackHelper internet;
     internet.Install(endUser1);
     internet.Install(ut);
@@ -57,7 +55,7 @@ int main(int argc, char *argv[]) {
     internet.Install(gw);
     internet.Install(endUser2);
 
-    // 6️⃣ IP 주소 할당
+    // IP 주소 할당
     Ipv4AddressHelper ipv4;
 
     ipv4.SetBase("10.1.1.0", "255.255.255.0");
@@ -75,15 +73,15 @@ int main(int argc, char *argv[]) {
     ipv4.SetBase("10.1.5.0", "255.255.255.0");
     Ipv4InterfaceContainer ifIdeal = ipv4.Assign(devIdeal);
 
-    // 7️⃣ TCP 서버 설정 (EndUser2에서 실행)
+    // TCP 서버 (EndUser2)
     uint16_t port = 8080;
-    Address serverAddress(InetSocketAddress(ifIdeal.GetAddress(1), port)); // ✅ 수정 완료
+    Address serverAddress(InetSocketAddress(ifIdeal.GetAddress(1), port));
     PacketSinkHelper tcpServer("ns3::TcpSocketFactory", serverAddress);
     ApplicationContainer serverApps = tcpServer.Install(endUser2.Get(0));
     serverApps.Start(Seconds(1.0));
     serverApps.Stop(Seconds(20.0));
 
-    // 8️⃣ TCP 클라이언트 설정 (EndUser1에서 실행)
+    // TCP 클라이언트 (EndUser1)
     OnOffHelper tcpClient("ns3::TcpSocketFactory", serverAddress);
     tcpClient.SetAttribute("DataRate", StringValue("1Mbps"));
     tcpClient.SetAttribute("PacketSize", UintegerValue(1024));
@@ -94,10 +92,10 @@ int main(int argc, char *argv[]) {
     clientApps.Start(Seconds(2.0));
     clientApps.Stop(Seconds(20.0));
 
-    // 9️⃣ 패킷 캡처 활성화 (PCAP 파일 저장)
-    csma.EnablePcapAll("satellite-network");
-    satNetDeviceHelper.EnablePcapAll("satellite-network");  // ✅ SAT 채널 패킷 캡처로 수정 완료
-    idealLink.EnablePcapAll("satellite-network");
+    // 패킷 캡처 활성화
+    csma.EnablePcapAll("satellite-network-csma");
+    satelliteLink.EnablePcapAll("satellite-network-satlink");
+    idealLink.EnablePcapAll("satellite-network-p2p");
 
     NS_LOG_INFO("Running Simulation...");
     Simulator::Run();
@@ -106,4 +104,3 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
-
