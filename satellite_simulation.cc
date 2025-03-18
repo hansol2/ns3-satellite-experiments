@@ -63,4 +63,47 @@ int main(int argc, char *argv[]) {
     Ipv4InterfaceContainer ifUtSat = ipv4.Assign(devUtSat);
 
     ipv4.SetBase("10.1.3.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifSatGw = ipv4.Assign
+    Ipv4InterfaceContainer ifSatGw = ipv4.Assign(devSatGw);
+
+    ipv4.SetBase("10.1.4.0", "255.255.255.0");
+    Ipv4InterfaceContainer ifGwEndUser2 = ipv4.Assign(devGwEndUser2);
+
+    // IP 출력 확인
+    NS_LOG_UNCOND("EndUser2 IP: " << ifGwEndUser2.GetAddress(1));
+
+    // TCP 서버 (EndUser2)
+    uint16_t port = 8080;
+    Address serverAddress(InetSocketAddress(ifGwEndUser2.GetAddress(1), port));
+    PacketSinkHelper tcpServer("ns3::TcpSocketFactory", serverAddress);
+    ApplicationContainer serverApps = tcpServer.Install(endUser2.Get(0));
+    serverApps.Start(Seconds(1.0));
+    serverApps.Stop(Seconds(60.0));
+
+    // TCP 클라이언트 (EndUser1)
+    OnOffHelper tcpClient("ns3::TcpSocketFactory", serverAddress);
+    tcpClient.SetAttribute("DataRate", StringValue("1Mbps"));
+    tcpClient.SetAttribute("PacketSize", UintegerValue(1024));
+    tcpClient.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
+    tcpClient.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+
+    ApplicationContainer clientApps = tcpClient.Install(endUser1.Get(0));
+    clientApps.Start(Seconds(2.0));
+    clientApps.Stop(Seconds(60.0));
+
+    // 라우팅 테이블 구성
+    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+
+    // 패킷 캡처
+    csma.EnablePcapAll("stable-satellite-csma");
+    satelliteLink.EnablePcapAll("stable-satellite-link");
+    gwToUserLink.EnablePcapAll("stable-gw-user2");
+
+    Simulator::Stop(Seconds(60.0));
+
+    NS_LOG_INFO("Running Stable Simulation...");
+    Simulator::Run();
+    Simulator::Destroy();
+    NS_LOG_INFO("Stable Simulation completed.");
+
+    return 0;
+}
