@@ -4,18 +4,15 @@
 #include "ns3/csma-module.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/applications-module.h"
+#include "ns3/flow-monitor-module.h"
 
 using namespace ns3;
-
-NS_LOG_COMPONENT_DEFINE("SatelliteNetworkStable");
 
 int main(int argc, char *argv[]) {
     CommandLine cmd;
     cmd.Parse(argc, argv);
 
-    NS_LOG_INFO("Starting Stable Satellite Network Simulation...");
-
-    // 노드 생성
+    // 1️⃣ 노드 생성
     NodeContainer endUser1, ut, satellite, gw, endUser2;
     endUser1.Create(1);
     ut.Create(1);
@@ -23,29 +20,26 @@ int main(int argc, char *argv[]) {
     gw.Create(1);
     endUser2.Create(1);
 
-    // CSMA 채널 (EndUser1 <-> UT)
+    // 2️⃣ EndUser1 <-> UT (CSMA 링크)
     CsmaHelper csma;
     csma.SetChannelAttribute("DataRate", StringValue("100Mbps"));
     csma.SetChannelAttribute("Delay", StringValue("1ms"));
-
     NetDeviceContainer devUserUt = csma.Install(NodeContainer(endUser1.Get(0), ut.Get(0)));
 
-    // 위성 링크 (PointToPointHelper)
-    PointToPointHelper satelliteLink;
-    satelliteLink.SetDeviceAttribute("DataRate", StringValue("10Mbps"));
-    satelliteLink.SetChannelAttribute("Delay", StringValue("250ms"));
+    // 3️⃣ UT <-> Satellite, Satellite <-> GW (위성 링크)
+    PointToPointHelper satLink;
+    satLink.SetDeviceAttribute("DataRate", StringValue("10Mbps"));
+    satLink.SetChannelAttribute("Delay", StringValue("250ms"));
+    NetDeviceContainer devUtSat = satLink.Install(ut.Get(0), satellite.Get(0));
+    NetDeviceContainer devSatGw = satLink.Install(satellite.Get(0), gw.Get(0));
 
-    NetDeviceContainer devUtSat = satelliteLink.Install(NodeContainer(ut.Get(0), satellite.Get(0)));
-    NetDeviceContainer devSatGw = satelliteLink.Install(NodeContainer(satellite.Get(0), gw.Get(0)));
-
-    // GW <-> EndUser2 연결 (P2P 고속 링크, 유일 경로)
+    // 4️⃣ GW <-> EndUser2 (고속 링크)
     PointToPointHelper gwToUserLink;
     gwToUserLink.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
     gwToUserLink.SetChannelAttribute("Delay", StringValue("0.1ms"));
+    NetDeviceContainer devGwUser = gwToUserLink.Install(NodeContainer(gw.Get(0), endUser2.Get(0)));
 
-    NetDeviceContainer devGwEndUser2 = gwToUserLink.Install(NodeContainer(gw.Get(0), endUser2.Get(0)));
-
-    // 인터넷 스택 설치
+    // 5️⃣ 인터넷 스택 설치
     InternetStackHelper internet;
     internet.Install(endUser1);
     internet.Install(ut);
@@ -53,9 +47,8 @@ int main(int argc, char *argv[]) {
     internet.Install(gw);
     internet.Install(endUser2);
 
-    // IP 주소 할당
+    // 6️⃣ IP 주소 할당
     Ipv4AddressHelper ipv4;
-
     ipv4.SetBase("10.1.1.0", "255.255.255.0");
     Ipv4InterfaceContainer ifUserUt = ipv4.Assign(devUserUt);
 
@@ -66,44 +59,43 @@ int main(int argc, char *argv[]) {
     Ipv4InterfaceContainer ifSatGw = ipv4.Assign(devSatGw);
 
     ipv4.SetBase("10.1.4.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifGwEndUser2 = ipv4.Assign(devGwEndUser2);
+    Ipv4InterfaceContainer ifGwUser = ipv4.Assign(devGwUser);
 
-    // IP 출력 확인
-    NS_LOG_UNCOND("EndUser2 IP: " << ifGwEndUser2.GetAddress(1));
-
-    // TCP 서버 (EndUser2)
+    // 7️⃣ TCP 서버 (EndUser2)
     uint16_t port = 8080;
-    Address serverAddress(InetSocketAddress(ifGwEndUser2.GetAddress(1), port));
-    PacketSinkHelper tcpServer("ns3::TcpSocketFactory", serverAddress);
-    ApplicationContainer serverApps = tcpServer.Install(endUser2.Get(0));
-    serverApps.Start(Seconds(1.0));
-    serverApps.Stop(Seconds(60.0));
+    Address serverAddress(InetSocketAddress(ifGwUser.GetAddress(1), port));
+    PacketSinkHelper sink("ns3::TcpSocketFactory", serverAddress);
+    ApplicationContainer serverApp = sink.Install(endUser2.Get(0));
+    serverApp.Start(Seconds(1.0));
+    serverApp.Stop(Seconds(20.0));
 
-    // TCP 클라이언트 (EndUser1)
-    OnOffHelper tcpClient("ns3::TcpSocketFactory", serverAddress);
-    tcpClient.SetAttribute("DataRate", StringValue("1Mbps"));
-    tcpClient.SetAttribute("PacketSize", UintegerValue(1024));
-    tcpClient.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    tcpClient.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+    // 8️⃣ TCP 클라이언트 (EndUser1)
+    OnOffHelper client("ns3::TcpSocketFactory", serverAddress);
+    client.SetAttribute("DataRate", StringValue("1Mbps"));
+    client.SetAttribute("PacketSize", UintegerValue(1024));
+    client.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
+    client.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
 
-    ApplicationContainer clientApps = tcpClient.Install(endUser1.Get(0));
-    clientApps.Start(Seconds(2.0));
-    clientApps.Stop(Seconds(60.0));
+    ApplicationContainer clientApp = client.Install(endUser1.Get(0));
+    clientApp.Start(Seconds(2.0));
+    clientApp.Stop(Seconds(20.0));
 
-    // 라우팅 테이블 구성
-    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+    // 9️⃣ 패킷 캡처 활성화
+    csma.EnablePcapAll("csma");
+    satLink.EnablePcapAll("satlink");
+    gwToUserLink.EnablePcapAll("gw-user");
 
-    // 패킷 캡처
-    csma.EnablePcapAll("stable-satellite-csma");
-    satelliteLink.EnablePcapAll("stable-satellite-link");
-    gwToUserLink.EnablePcapAll("stable-gw-user2");
+    // 🔟 FlowMonitor 설치 (트래픽 흐름 & 성능 분석용)
+    FlowMonitorHelper flowHelper;
+    Ptr<FlowMonitor> flowMonitor = flowHelper.InstallAll();
 
-    Simulator::Stop(Seconds(60.0));
-
-    NS_LOG_INFO("Running Stable Simulation...");
+    // 1️⃣1️⃣ 시뮬레이션 실행
+    Simulator::Stop(Seconds(20.0));
     Simulator::Run();
-    Simulator::Destroy();
-    NS_LOG_INFO("Stable Simulation completed.");
 
+    // 1️⃣2️⃣ FlowMonitor 결과 저장
+    flowMonitor->SerializeToXmlFile("flowmonitor-results.xml", true, true);
+
+    Simulator::Destroy();
     return 0;
 }
