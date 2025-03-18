@@ -72,13 +72,17 @@ int main(int argc, char *argv[]) {
     ipv4.SetBase("10.1.5.0", "255.255.255.0");
     Ipv4InterfaceContainer ifIdeal = ipv4.Assign(devIdeal);
 
+    // 디버그 출력으로 각 IP 주소 확인
+    NS_LOG_UNCOND("EndUser2 IP (from GW link): " << ifGwUser.GetAddress(1));
+    NS_LOG_UNCOND("EndUser2 IP (from ideal link): " << ifIdeal.GetAddress(1));
+
     // TCP 서버 (EndUser2)
     uint16_t port = 8080;
-    Address serverAddress(InetSocketAddress(ifGwUser.GetAddress(1), port)); // 디버그: ifGwUser 주소 사용
+    Address serverAddress(InetSocketAddress(ifGwUser.GetAddress(1), port)); // IP 확인 후 필요하면 조정
     PacketSinkHelper tcpServer("ns3::TcpSocketFactory", serverAddress);
     ApplicationContainer serverApps = tcpServer.Install(endUser2.Get(0));
     serverApps.Start(Seconds(1.0));
-    serverApps.Stop(Seconds(30.0)); // 더 길게 실행
+    serverApps.Stop(Seconds(60.0));
 
     // TCP 클라이언트 (EndUser1)
     OnOffHelper tcpClient("ns3::TcpSocketFactory", serverAddress);
@@ -89,16 +93,19 @@ int main(int argc, char *argv[]) {
 
     ApplicationContainer clientApps = tcpClient.Install(endUser1.Get(0));
     clientApps.Start(Seconds(2.0));
-    clientApps.Stop(Seconds(30.0));
+    clientApps.Stop(Seconds(60.0));
+
+    // 글로벌 라우팅 테이블 구성
+    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
     // 패킷 캡처 활성화
     csma.EnablePcapAll("satellite-network-csma-debug");
     satelliteLink.EnablePcapAll("satellite-network-satlink-debug");
     idealLink.EnablePcapAll("satellite-network-p2p-debug");
 
-    Simulator::Stop(Seconds(30.0)); // 시뮬레이션 명시적 종료 시간
+    Simulator::Stop(Seconds(60.0));
 
-    NS_LOG_INFO("Running Simulation (Debug Version)...");
+    NS_LOG_INFO("Running Simulation (Debug with IP printouts)...");
     Simulator::Run();
     Simulator::Destroy();
     NS_LOG_INFO("Simulation completed (Debug).");
