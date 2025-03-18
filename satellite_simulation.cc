@@ -1,4 +1,3 @@
-
 #include "ns3/core-module.h"
 #include "ns3/network-module.h"
 #include "ns3/internet-module.h"
@@ -8,13 +7,13 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("SatelliteNetwork");
+NS_LOG_COMPONENT_DEFINE("SatelliteNetworkDebug");
 
 int main(int argc, char *argv[]) {
     CommandLine cmd;
     cmd.Parse(argc, argv);
 
-    NS_LOG_INFO("Starting Satellite Network Simulation...");
+    NS_LOG_INFO("Starting Satellite Network Simulation (Debug Version)...");
 
     // 노드 생성
     NodeContainer endUser1, ut, satellite, gw, endUser2;
@@ -24,7 +23,7 @@ int main(int argc, char *argv[]) {
     gw.Create(1);
     endUser2.Create(1);
 
-    // CSMA 채널 설정 (EndUser1 <-> UT, GW <-> EndUser2)
+    // CSMA 채널 설정
     CsmaHelper csma;
     csma.SetChannelAttribute("DataRate", StringValue("100Mbps"));
     csma.SetChannelAttribute("Delay", StringValue("1ms"));
@@ -32,7 +31,7 @@ int main(int argc, char *argv[]) {
     NetDeviceContainer devUserUt = csma.Install(NodeContainer(endUser1.Get(0), ut.Get(0)));
     NetDeviceContainer devGwUser = csma.Install(NodeContainer(gw.Get(0), endUser2.Get(0)));
 
-    // 위성 링크 (PointToPointHelper로 대체)
+    // 위성 링크 (PointToPointHelper)
     PointToPointHelper satelliteLink;
     satelliteLink.SetDeviceAttribute("DataRate", StringValue("10Mbps"));
     satelliteLink.SetChannelAttribute("Delay", StringValue("250ms"));
@@ -40,7 +39,7 @@ int main(int argc, char *argv[]) {
     NetDeviceContainer devUtSat = satelliteLink.Install(NodeContainer(ut.Get(0), satellite.Get(0)));
     NetDeviceContainer devSatGw = satelliteLink.Install(NodeContainer(satellite.Get(0), gw.Get(0)));
 
-    // GW <-> EndUser2 연결 (P2P 고속 링크)
+    // GW <-> EndUser2 링크
     PointToPointHelper idealLink;
     idealLink.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
     idealLink.SetChannelAttribute("Delay", StringValue("0.1ms"));
@@ -75,11 +74,11 @@ int main(int argc, char *argv[]) {
 
     // TCP 서버 (EndUser2)
     uint16_t port = 8080;
-    Address serverAddress(InetSocketAddress(ifIdeal.GetAddress(1), port));
+    Address serverAddress(InetSocketAddress(ifGwUser.GetAddress(1), port)); // 디버그: ifGwUser 주소 사용
     PacketSinkHelper tcpServer("ns3::TcpSocketFactory", serverAddress);
     ApplicationContainer serverApps = tcpServer.Install(endUser2.Get(0));
     serverApps.Start(Seconds(1.0));
-    serverApps.Stop(Seconds(20.0));
+    serverApps.Stop(Seconds(30.0)); // 더 길게 실행
 
     // TCP 클라이언트 (EndUser1)
     OnOffHelper tcpClient("ns3::TcpSocketFactory", serverAddress);
@@ -90,17 +89,19 @@ int main(int argc, char *argv[]) {
 
     ApplicationContainer clientApps = tcpClient.Install(endUser1.Get(0));
     clientApps.Start(Seconds(2.0));
-    clientApps.Stop(Seconds(20.0));
+    clientApps.Stop(Seconds(30.0));
 
     // 패킷 캡처 활성화
-    csma.EnablePcapAll("satellite-network-csma");
-    satelliteLink.EnablePcapAll("satellite-network-satlink");
-    idealLink.EnablePcapAll("satellite-network-p2p");
+    csma.EnablePcapAll("satellite-network-csma-debug");
+    satelliteLink.EnablePcapAll("satellite-network-satlink-debug");
+    idealLink.EnablePcapAll("satellite-network-p2p-debug");
 
-    NS_LOG_INFO("Running Simulation...");
+    Simulator::Stop(Seconds(30.0)); // 시뮬레이션 명시적 종료 시간
+
+    NS_LOG_INFO("Running Simulation (Debug Version)...");
     Simulator::Run();
     Simulator::Destroy();
-    NS_LOG_INFO("Simulation completed.");
+    NS_LOG_INFO("Simulation completed (Debug).");
 
     return 0;
 }
