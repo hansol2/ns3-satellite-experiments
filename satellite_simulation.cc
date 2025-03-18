@@ -7,13 +7,13 @@
 
 using namespace ns3;
 
-NS_LOG_COMPONENT_DEFINE("SatelliteNetworkDebug");
+NS_LOG_COMPONENT_DEFINE("SatelliteNetworkStable");
 
 int main(int argc, char *argv[]) {
     CommandLine cmd;
     cmd.Parse(argc, argv);
 
-    NS_LOG_INFO("Starting Satellite Network Simulation (Debug Version)...");
+    NS_LOG_INFO("Starting Stable Satellite Network Simulation...");
 
     // 노드 생성
     NodeContainer endUser1, ut, satellite, gw, endUser2;
@@ -23,13 +23,12 @@ int main(int argc, char *argv[]) {
     gw.Create(1);
     endUser2.Create(1);
 
-    // CSMA 채널 설정
+    // CSMA 채널 (EndUser1 <-> UT)
     CsmaHelper csma;
     csma.SetChannelAttribute("DataRate", StringValue("100Mbps"));
     csma.SetChannelAttribute("Delay", StringValue("1ms"));
 
     NetDeviceContainer devUserUt = csma.Install(NodeContainer(endUser1.Get(0), ut.Get(0)));
-    NetDeviceContainer devGwUser = csma.Install(NodeContainer(gw.Get(0), endUser2.Get(0)));
 
     // 위성 링크 (PointToPointHelper)
     PointToPointHelper satelliteLink;
@@ -39,12 +38,12 @@ int main(int argc, char *argv[]) {
     NetDeviceContainer devUtSat = satelliteLink.Install(NodeContainer(ut.Get(0), satellite.Get(0)));
     NetDeviceContainer devSatGw = satelliteLink.Install(NodeContainer(satellite.Get(0), gw.Get(0)));
 
-    // GW <-> EndUser2 링크
-    PointToPointHelper idealLink;
-    idealLink.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
-    idealLink.SetChannelAttribute("Delay", StringValue("0.1ms"));
+    // GW <-> EndUser2 연결 (P2P 고속 링크, 유일 경로)
+    PointToPointHelper gwToUserLink;
+    gwToUserLink.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
+    gwToUserLink.SetChannelAttribute("Delay", StringValue("0.1ms"));
 
-    NetDeviceContainer devIdeal = idealLink.Install(NodeContainer(gw.Get(0), endUser2.Get(0)));
+    NetDeviceContainer devGwEndUser2 = gwToUserLink.Install(NodeContainer(gw.Get(0), endUser2.Get(0)));
 
     // 인터넷 스택 설치
     InternetStackHelper internet;
@@ -64,51 +63,4 @@ int main(int argc, char *argv[]) {
     Ipv4InterfaceContainer ifUtSat = ipv4.Assign(devUtSat);
 
     ipv4.SetBase("10.1.3.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifSatGw = ipv4.Assign(devSatGw);
-
-    ipv4.SetBase("10.1.4.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifGwUser = ipv4.Assign(devGwUser);
-
-    ipv4.SetBase("10.1.5.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifIdeal = ipv4.Assign(devIdeal);
-
-    // 디버그 출력으로 각 IP 주소 확인
-    NS_LOG_UNCOND("EndUser2 IP (from GW link): " << ifGwUser.GetAddress(1));
-    NS_LOG_UNCOND("EndUser2 IP (from ideal link): " << ifIdeal.GetAddress(1));
-
-    // TCP 서버 (EndUser2)
-    uint16_t port = 8080;
-    Address serverAddress(InetSocketAddress(ifGwUser.GetAddress(1), port)); // IP 확인 후 필요하면 조정
-    PacketSinkHelper tcpServer("ns3::TcpSocketFactory", serverAddress);
-    ApplicationContainer serverApps = tcpServer.Install(endUser2.Get(0));
-    serverApps.Start(Seconds(1.0));
-    serverApps.Stop(Seconds(60.0));
-
-    // TCP 클라이언트 (EndUser1)
-    OnOffHelper tcpClient("ns3::TcpSocketFactory", serverAddress);
-    tcpClient.SetAttribute("DataRate", StringValue("1Mbps"));
-    tcpClient.SetAttribute("PacketSize", UintegerValue(1024));
-    tcpClient.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
-    tcpClient.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
-
-    ApplicationContainer clientApps = tcpClient.Install(endUser1.Get(0));
-    clientApps.Start(Seconds(2.0));
-    clientApps.Stop(Seconds(60.0));
-
-    // 글로벌 라우팅 테이블 구성
-    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
-
-    // 패킷 캡처 활성화
-    csma.EnablePcapAll("satellite-network-csma-debug");
-    satelliteLink.EnablePcapAll("satellite-network-satlink-debug");
-    idealLink.EnablePcapAll("satellite-network-p2p-debug");
-
-    Simulator::Stop(Seconds(60.0));
-
-    NS_LOG_INFO("Running Simulation (Debug with IP printouts)...");
-    Simulator::Run();
-    Simulator::Destroy();
-    NS_LOG_INFO("Simulation completed (Debug).");
-
-    return 0;
-}
+    Ipv4InterfaceContainer ifSatGw = ipv4.Assign
