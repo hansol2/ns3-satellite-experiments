@@ -61,6 +61,12 @@ int main(int argc, char *argv[]) {
     ipv4.SetBase("10.1.4.0", "255.255.255.0");
     Ipv4InterfaceContainer ifGwUser = ipv4.Assign(devGwUser);
 
+    // ⭐ 할당된 IP 주소 출력해서 점검!
+    std::cout << "EndUser2 IP: " << ifGwUser.GetAddress(1) << std::endl;
+
+    // ⭐ 라우팅 테이블 생성 (중요!)
+    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+
     // 7️⃣ TCP 서버 (EndUser2)
     uint16_t port = 8080;
     Address serverAddress(InetSocketAddress(ifGwUser.GetAddress(1), port));
