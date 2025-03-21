@@ -3,7 +3,9 @@
 #include "ns3/internet-module.h"
 #include "ns3/csma-module.h"
 #include "ns3/applications-module.h"
-#include "ns3/satellite-point-to-point-isl-helper.h"
+#include "ns3/wifi-module.h"
+#include "ns3/mobility-module.h"
+#include "ns3/point-to-point-module.h"
 #include "ns3/pcap-file-wrapper.h"
 
 using namespace ns3;
@@ -27,8 +29,6 @@ int main(int argc, char *argv[]) {
     CommandLine cmd;
     cmd.Parse(argc, argv);
 
-    NS_LOG_INFO("Starting Satellite Network Simulation with ISL Helper and Global PCAP Capture...");
-
     NodeContainer endUser1, ut, satellite, gw, endUser2;
     endUser1.Create(1);
     ut.Create(1);
@@ -36,25 +36,56 @@ int main(int argc, char *argv[]) {
     gw.Create(1);
     endUser2.Create(1);
 
+    // 위치 설정 (실제 GEO 위성 거리 적용)
+    MobilityHelper mobility;
+    mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+
+    mobility.Install(endUser1);
+    endUser1.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(0.0, 0.0, 0.0));
+
+    mobility.Install(ut);
+    ut.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(500.0, 0.0, 0.0));
+
+    mobility.Install(satellite);
+    satellite.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(0.0, 0.0, 36000000.0)); // GEO 높이 (36,000 km)
+
+    mobility.Install(gw);
+    gw.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(1000.0, 0.0, 0.0));
+
+    mobility.Install(endUser2);
+    endUser2.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(2000.0, 0.0, 0.0));
+
+    // 유선 링크: user1 <-> ut
     CsmaHelper csma;
     csma.SetChannelAttribute("DataRate", StringValue("100Mbps"));
     csma.SetChannelAttribute("Delay", StringValue("1ms"));
-
     NetDeviceContainer devUserUt = csma.Install(NodeContainer(endUser1.Get(0), ut.Get(0)));
-    NetDeviceContainer devGwUser = csma.Install(NodeContainer(gw.Get(0), endUser2.Get(0)));
 
-    SatellitePointToPointIslHelper satLink;
-    satLink.SetDeviceAttribute("DataRate", StringValue("10Mbps"));
-    satLink.SetChannelAttribute("MaxPropagationDelay", TimeValue(Seconds(0.5)));
+    // 현실적인 위성 무선 링크 설정 (UT <-> Satellite, Satellite <-> GW)
+    YansWifiChannelHelper wifiChannel = YansWifiChannelHelper::Default();
+    wifiChannel.AddPropagationLoss("ns3::FriisPropagationLossModel", "Frequency", DoubleValue(14e9)); // Ku-band 14GHz
+    wifiChannel.AddPropagationLoss("ns3::ConstantLossModel", "Loss", DoubleValue(2)); // 대기 감쇠 추가
+    wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
 
-    NetDeviceContainer devUtSat = satLink.Install(ut.Get(0), satellite.Get(0));
-    NetDeviceContainer devSatGw = satLink.Install(satellite.Get(0), gw.Get(0));
+    YansWifiPhyHelper wifiPhy = YansWifiPhyHelper::Default();
+    wifiPhy.SetChannel(wifiChannel.Create());
+    wifiPhy.Set("TxPowerStart", DoubleValue(40)); // 40 dBm (10W)
+    wifiPhy.Set("TxPowerEnd", DoubleValue(40));
 
-    PointToPointHelper idealLink;
-    idealLink.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
-    idealLink.SetChannelAttribute("Delay", StringValue("0.1ms"));
+    WifiHelper wifi;
+    wifi.SetStandard(WIFI_STANDARD_80211n);
 
-    NetDeviceContainer devIdeal = idealLink.Install(NodeContainer(gw.Get(0), endUser2.Get(0)));
+    WifiMacHelper wifiMac;
+    wifiMac.SetType("ns3::AdhocWifiMac");
+
+    NetDeviceContainer devUtSat = wifi.Install(wifiPhy, wifiMac, NodeContainer(ut.Get(0), satellite.Get(0)));
+    NetDeviceContainer devSatGw = wifi.Install(wifiPhy, wifiMac, NodeContainer(satellite.Get(0), gw.Get(0)));
+
+    // 고속 유선 링크: gw <-> user2
+    PointToPointHelper p2p;
+    p2p.SetDeviceAttribute("DataRate", StringValue("1Gbps"));
+    p2p.SetChannelAttribute("Delay", StringValue("0.1ms"));
+    NetDeviceContainer devGwUser = p2p.Install(NodeContainer(gw.Get(0), endUser2.Get(0)));
 
     InternetStackHelper internet;
     internet.Install(endUser1);
@@ -76,11 +107,8 @@ int main(int argc, char *argv[]) {
     ipv4.SetBase("10.1.4.0", "255.255.255.0");
     Ipv4InterfaceContainer ifGwUser = ipv4.Assign(devGwUser);
 
-    ipv4.SetBase("10.1.5.0", "255.255.255.0");
-    Ipv4InterfaceContainer ifIdeal = ipv4.Assign(devIdeal);
-
     uint16_t port = 8080;
-    Address serverAddress(InetSocketAddress(ifIdeal.GetAddress(1), port));
+    Address serverAddress(InetSocketAddress(ifGwUser.GetAddress(1), port));
     PacketSinkHelper tcpServer("ns3::TcpSocketFactory", serverAddress);
     ApplicationContainer serverApps = tcpServer.Install(endUser2.Get(0));
     serverApps.Start(Seconds(1.0));
@@ -98,12 +126,10 @@ int main(int argc, char *argv[]) {
 
     SetupGlobalPcapCapture();
 
-    NS_LOG_INFO("Running Simulation with ISL support...");
     Simulator::Run();
     Simulator::Destroy();
 
     globalPcapFile->Close();
 
-    NS_LOG_INFO("Simulation completed.");
     return 0;
 }
