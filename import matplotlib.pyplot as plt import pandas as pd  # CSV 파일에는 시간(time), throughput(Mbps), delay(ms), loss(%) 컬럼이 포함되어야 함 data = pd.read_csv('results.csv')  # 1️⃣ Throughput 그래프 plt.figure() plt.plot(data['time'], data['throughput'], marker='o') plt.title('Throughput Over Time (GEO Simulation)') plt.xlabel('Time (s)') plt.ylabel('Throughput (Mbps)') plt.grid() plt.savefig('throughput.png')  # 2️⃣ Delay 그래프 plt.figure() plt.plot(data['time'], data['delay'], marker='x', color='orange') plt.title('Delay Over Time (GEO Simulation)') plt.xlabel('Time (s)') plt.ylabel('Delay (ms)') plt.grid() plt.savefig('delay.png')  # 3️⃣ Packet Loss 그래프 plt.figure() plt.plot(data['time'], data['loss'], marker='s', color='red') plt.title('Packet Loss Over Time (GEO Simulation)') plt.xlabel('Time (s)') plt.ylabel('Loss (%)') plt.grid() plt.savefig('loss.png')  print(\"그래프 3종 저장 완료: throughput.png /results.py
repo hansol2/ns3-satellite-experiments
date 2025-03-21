@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# CSV 파일에는 시간(time), throughput(Mbps), delay(ms), loss(%) 컬럼이 포함되어야 함
 data = pd.read_csv('results.csv')
 
 plt.figure()
